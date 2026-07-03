@@ -27,10 +27,16 @@ current toolchains resolve the latest.
 
 ```bash
 cd your-repo
-nbstrip install
+nbstrip install    # detects git or Mercurial
 ```
 
-This registers the binary as the repository's clean filter for `*.ipynb`
+**Mercurial:** inside an hg repository, `install` writes an `[encode]` filter
+to `.hg/hgrc` (`**.ipynb = pipe: /path/to/nbstrip`) — same effect: commits
+store stripped notebooks, the working directory keeps its outputs. Repo-local
+and idempotent; a reinstall updates the binary path in place. When a git and
+an hg repository are nested, git wins.
+
+**Git:** `install` registers the binary as the repository's clean filter for `*.ipynb`
 (`filter.nbstrip.clean` + `filter.nbstrip.required` in the repo's git config,
 the attribute line in `.git/info/attributes`). Nothing needs committing. From
 then on `git add` stages notebooks stripped, `git diff`/`git status` compare

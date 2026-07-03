@@ -29,8 +29,9 @@ usage:
   nbstrip FILE...        rewrite files in place
   nbstrip -t FILE...     print stripped notebooks to stdout
   nbstrip < in > out     stdin to stdout (the git clean filter)
-  nbstrip install        register as the current git repository's clean filter
-                         for *.ipynb (git config + .git/info/attributes)
+  nbstrip install        register as the current repository's filter for
+                         *.ipynb — git (config + .git/info/attributes) or
+                         Mercurial ([encode] pipe filter in .hg/hgrc)
 
 options:
   -t, --textconv         print stripped notebooks to stdout instead of
@@ -53,6 +54,10 @@ const FILTER_CLEAN_KEY: &str = "filter.nbstrip.clean";
 const FILTER_REQUIRED_KEY: &str = "filter.nbstrip.required";
 /// The attribute line `install` writes into `.git/info/attributes`.
 const ATTRIBUTES_LINE: &str = "*.ipynb filter=nbstrip";
+
+/// Mercurial: the `.hg/hgrc` section and filter pattern `install` manages.
+const HG_ENCODE_SECTION: &str = "[encode]";
+const HG_ENCODE_PATTERN: &str = "**.ipynb";
 
 fn main() -> ExitCode {
     match run() {
@@ -141,27 +146,38 @@ fn strip_to_string(input: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// Register this binary as the repository's clean filter for `*.ipynb`.
+/// Register this binary as the repository's filter for `*.ipynb` — git clean
+/// filter or Mercurial `[encode]` filter, whichever repository we're inside
+/// (git wins when nested).
 ///
-/// Everything is repo-local and nothing needs committing: the filter command
-/// goes to `git config` (per-clone by design) and the attribute line to
-/// `.git/info/attributes`. Teams that want the attribute to travel with the
-/// repo commit `*.ipynb filter=nbstrip` to `.gitattributes` instead — each
-/// clone still runs `nbstrip install` (git never ships config).
+/// Everything is repo-local and nothing needs committing: git config +
+/// `.git/info/attributes`, or `.hg/hgrc`. Teams that want the git *routing*
+/// to travel with the repo commit `*.ipynb filter=nbstrip` to `.gitattributes`
+/// instead — each clone still runs `nbstrip install` (VCSes never ship
+/// config).
 fn install() -> Result<(), String> {
-    let git_dir = git_stdout(&["rev-parse", "--absolute-git-dir"])
-        .map_err(|e| format!("not inside a git repository? {e}"))?;
-
     let exe = env::current_exe().map_err(|e| format!("resolving own path: {e}"))?;
     let exe = exe
         .to_str()
-        .ok_or("this executable's path is not valid UTF-8")?;
+        .ok_or("this executable's path is not valid UTF-8")?
+        .to_owned();
+    if let Ok(git_dir) = cmd_stdout("git", &["rev-parse", "--absolute-git-dir"]) {
+        return install_git(&git_dir, &exe);
+    }
+    if let Ok(hg_root) = cmd_stdout("hg", &["root"]) {
+        return install_hg(&hg_root, &exe);
+    }
+    Err("not inside a git or Mercurial repository".to_owned())
+}
+
+/// Git: filter config (per-clone) + the attribute line in `.git/info/attributes`.
+fn install_git(git_dir: &str, exe: &str) -> Result<(), String> {
     // The config value is run by git through `sh`, so quote the path.
     let clean_cmd = shell_quote(exe);
-    git_ok(&["config", FILTER_CLEAN_KEY, &clean_cmd])?;
-    git_ok(&["config", FILTER_REQUIRED_KEY, "true"])?;
+    cmd_ok("git", &["config", FILTER_CLEAN_KEY, &clean_cmd])?;
+    cmd_ok("git", &["config", FILTER_REQUIRED_KEY, "true"])?;
 
-    let attributes = Path::new(&git_dir).join("info").join("attributes");
+    let attributes = Path::new(git_dir).join("info").join("attributes");
     let existing = fs::read_to_string(&attributes).unwrap_or_default();
     if existing.lines().any(|l| l.trim() == ATTRIBUTES_LINE) {
         println!("attributes already present: {}", attributes.display());
@@ -188,15 +204,67 @@ fn install() -> Result<(), String> {
     Ok(())
 }
 
-/// Run git, require success, return trimmed stdout.
-fn git_stdout(args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
+/// Mercurial: an `[encode]` filter in `.hg/hgrc` — the same stdin→stdout
+/// contract as a git clean filter, applied as content enters the repository.
+/// Idempotent: an existing `**.ipynb` filter line is replaced (a reinstall
+/// from a new binary location must win), anything else in the file is kept.
+fn install_hg(hg_root: &str, exe: &str) -> Result<(), String> {
+    let hgrc = Path::new(hg_root).join(".hg").join("hgrc");
+    let filter_line = format!("{HG_ENCODE_PATTERN} = pipe: {}", shell_quote(exe));
+
+    let existing = fs::read_to_string(&hgrc).unwrap_or_default();
+    let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
+    let mut in_encode = false;
+    let mut replaced = false;
+    let mut insert_at = None; // after the [encode] header, or its last line
+    for (i, line) in lines.iter_mut().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_encode = trimmed == HG_ENCODE_SECTION;
+        }
+        if in_encode {
+            insert_at = Some(i + 1);
+            if trimmed
+                .split('=')
+                .next()
+                .is_some_and(|key| key.trim() == HG_ENCODE_PATTERN)
+            {
+                line.clone_from(&filter_line);
+                replaced = true;
+                break;
+            }
+        }
+    }
+    if !replaced {
+        if let Some(at) = insert_at {
+            lines.insert(at, filter_line.clone());
+        } else {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push(HG_ENCODE_SECTION.to_owned());
+            lines.push(filter_line.clone());
+        }
+    }
+    fs::write(&hgrc, format!("{}\n", lines.join("\n")))
+        .map_err(|e| format!("writing {}: {e}", hgrc.display()))?;
+
+    println!("wrote {}:", hgrc.display());
+    println!("  {HG_ENCODE_SECTION}");
+    println!("  {filter_line}");
+    println!("notebooks now strip on `hg commit`; the working directory keeps its outputs.");
+    Ok(())
+}
+
+/// Run a command, require success, return trimmed stdout.
+fn cmd_stdout(cmd: &str, args: &[&str]) -> Result<String, String> {
+    let out = Command::new(cmd)
         .args(args)
         .output()
-        .map_err(|e| format!("running git: {e}"))?;
+        .map_err(|e| format!("running {cmd}: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "git {} failed: {}",
+            "{cmd} {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&out.stderr).trim()
         ));
@@ -204,9 +272,9 @@ fn git_stdout(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
-/// Run git for its side effect, requiring success.
-fn git_ok(args: &[&str]) -> Result<(), String> {
-    git_stdout(args).map(|_| ())
+/// Run a command for its side effect, requiring success.
+fn cmd_ok(cmd: &str, args: &[&str]) -> Result<(), String> {
+    cmd_stdout(cmd, args).map(|_| ())
 }
 
 /// Quote a path for the POSIX shell git uses to run filter commands.

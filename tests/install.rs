@@ -115,3 +115,79 @@ fn install_outside_a_repo_fails() {
     assert!(!out.status.success());
     let _ = fs::remove_dir_all(&dir);
 }
+
+fn hg_available() -> bool {
+    Command::new("hg")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+fn hg_dir(name: &str) -> PathBuf {
+    let dir = env::temp_dir().join(format!("nbstrip-test-{}-{name}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    run(&dir, "hg", &["init"]);
+    dir
+}
+
+#[test]
+fn install_then_hg_commit_stores_stripped_notebooks() {
+    if !hg_available() {
+        eprintln!("hg not installed; skipping");
+        return;
+    }
+    let dir = hg_dir("hg-install");
+
+    run(&dir, env!("CARGO_BIN_EXE_nbstrip"), &["install"]);
+    let hgrc = fs::read_to_string(dir.join(".hg/hgrc")).unwrap();
+    assert!(hgrc.contains("[encode]"), "hgrc: {hgrc}");
+    assert!(hgrc.contains("**.ipynb = pipe: "), "hgrc: {hgrc}");
+
+    // Round trip: the repository stores stripped bytes, the working
+    // directory keeps outputs.
+    fs::write(dir.join("nb.ipynb"), NOTEBOOK).unwrap();
+    run(&dir, "hg", &["add", "nb.ipynb"]);
+    let out = Command::new("hg")
+        .args(["commit", "-m", "add notebook"])
+        .env("HGUSER", "nbstrip-test")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "hg commit failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stored = run(&dir, "hg", &["cat", "nb.ipynb"]);
+    assert!(stored.contains("\"outputs\": []"), "stored: {stored}");
+    assert!(!stored.contains("huge plotly blob"));
+    let worktree = fs::read_to_string(dir.join("nb.ipynb")).unwrap();
+    assert!(worktree.contains("huge plotly blob"));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hg_install_is_idempotent_and_preserves_hgrc() {
+    if !hg_available() {
+        eprintln!("hg not installed; skipping");
+        return;
+    }
+    let dir = hg_dir("hg-idempotent");
+    fs::write(
+        dir.join(".hg/hgrc"),
+        "[ui]\nusername = keep me\n\n[encode]\n**.gz = pipe: gunzip\n",
+    )
+    .unwrap();
+
+    run(&dir, env!("CARGO_BIN_EXE_nbstrip"), &["install"]);
+    run(&dir, env!("CARGO_BIN_EXE_nbstrip"), &["install"]);
+
+    let hgrc = fs::read_to_string(dir.join(".hg/hgrc")).unwrap();
+    let ours = hgrc.lines().filter(|l| l.starts_with("**.ipynb")).count();
+    assert_eq!(ours, 1, "filter line duplicated:\n{hgrc}");
+    assert!(hgrc.contains("username = keep me"), "hgrc: {hgrc}");
+    assert!(hgrc.contains("**.gz = pipe: gunzip"), "hgrc: {hgrc}");
+    assert_eq!(hgrc.matches("[encode]").count(), 1, "hgrc: {hgrc}");
+    let _ = fs::remove_dir_all(&dir);
+}

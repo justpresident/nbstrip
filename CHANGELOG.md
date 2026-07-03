@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Mercurial support: `nbstrip install` inside an hg repository writes an
+  `[encode]` pipe filter for `**.ipynb` to `.hg/hgrc` (repo-local, idempotent,
+  preserves existing hgrc content; replaces the filter line on reinstall).
+  Auto-detected — git wins when repositories are nested.
+
 ### Changed
 
 - MSRV lowered from 1.88 to **1.70** (edition 2024 -> 2021; no functional
