@@ -1,14 +1,14 @@
 [package]
 name = "nbstrip"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.88"
+edition = "2021"
+rust-version = "1.70"
 license = "Apache-2.0"
-description = "Fast Jupyter notebook output stripper and git clean filter: outputs, execution counts, and transient metadata never reach git."
+description = "Fast *.ipynb notebook output stripper and git clean filter: outputs, execution counts, and transient metadata never reach git."
 readme = "README.md"
 repository = "https://github.com/justpresident/nbstrip"
 documentation = "https://docs.rs/nbstrip"
-keywords = ["jupyter", "notebook", "git", "filter", "nbstripout"]
+keywords = ["jupyter", "notebook", "git", "filter", "nbstripout", "ipynb"]
 categories = ["command-line-utilities", "development-tools"]
 # Dev-only files stay out of the published package.
 exclude = [".github/", "docs/", "scripts/"]

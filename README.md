@@ -18,6 +18,11 @@ embedded plotly figures stop hiding real changes.
 cargo install nbstrip
 ```
 
+MSRV is **Rust 1.70**. On older toolchains (< 1.85) use
+`cargo install --locked nbstrip` — the shipped lockfile pins
+dependency versions that still support 1.70; unlocked installs on
+current toolchains resolve the latest.
+
 ## Wire a repository (once per clone)
 
 ```bash

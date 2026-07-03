@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- MSRV lowered from 1.88 to **1.70** (edition 2024 -> 2021; no functional
+  change). The committed lockfile is v3 and pins MSRV-compatible dependency
+  versions (`serde_json` 1.0.149, `zmij` 1.0.19), so `cargo install --locked
+  nbstrip` works on rustc 1.70+; unlocked installs on modern toolchains
+  resolve the latest.
+
 ### Fixed
 
 - `--help` now lists the options (`-t`/`--textconv`, `-h`/`--help`,

@@ -17,8 +17,8 @@ use std::process::{Command, ExitCode};
 use std::{env, fs, io};
 
 use serde::Serialize;
-use serde_json::Value;
 use serde_json::ser::{PrettyFormatter, Serializer};
+use serde_json::Value;
 
 mod strip;
 

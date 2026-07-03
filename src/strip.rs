@@ -102,7 +102,7 @@ fn null_key(obj: &mut JsonMap, key: &str) {
 #[allow(clippy::needless_pass_by_value)] // json!-consuming helpers read better by value
 mod tests {
     use super::strip;
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     fn code_cell(outputs: Value, metadata: Value) -> Value {
         json!({
