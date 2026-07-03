@@ -32,6 +32,12 @@ usage:
   nbstrip install        register as the current git repository's clean filter
                          for *.ipynb (git config + .git/info/attributes)
 
+options:
+  -t, --textconv         print stripped notebooks to stdout instead of
+                         rewriting them in place
+  -h, --help             print this help
+  -V, --version          print the version
+
 Cells or notebooks marked `keep_output` (metadata or cell tag) keep outputs.
 ";
 

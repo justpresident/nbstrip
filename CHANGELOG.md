@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `--help` now lists the options (`-t`/`--textconv`, `-h`/`--help`,
+  `-V`/`--version`); the flags existed but were undocumented.
+
 ## [0.1.0] - 2026-07-03
 
 ### Added
