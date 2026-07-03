@@ -8,7 +8,7 @@ description = "Fast *.ipynb notebook output stripper and git clean filter: outpu
 readme = "README.md"
 repository = "https://github.com/justpresident/nbstrip"
 documentation = "https://docs.rs/nbstrip"
-keywords = ["jupyter", "notebook", "git", "filter", "nbstripout", "ipynb"]
+keywords = ["jupyter", "notebook", "ipynb", "filter", "nbstripout"]
 categories = ["command-line-utilities", "development-tools"]
 # Dev-only files stay out of the published package.
 exclude = [".github/", "docs/", "scripts/"]
