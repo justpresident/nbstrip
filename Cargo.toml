@@ -1,0 +1,36 @@
+[package]
+name = "nbstrip"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+description = "Fast Jupyter notebook output stripper and git clean filter: outputs, execution counts, and transient metadata never reach git."
+readme = "README.md"
+repository = "https://github.com/justpresident/nbstrip"
+documentation = "https://docs.rs/nbstrip"
+keywords = ["jupyter", "notebook", "git", "filter", "nbstripout"]
+categories = ["command-line-utilities", "development-tools"]
+# Dev-only files stay out of the published package.
+exclude = [".github/", "docs/", "scripts/"]
+
+[dependencies]
+serde = "1"
+serde_json = "1"
+
+# Strict lint policy (CI runs `-D warnings`).
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+dbg_macro = "warn"
+missing_const_for_fn = "warn"
+needless_pass_by_value = "warn"
+redundant_pub_crate = "warn"
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+multiple_crate_versions = "allow"
+missing_panics_doc = "allow"
