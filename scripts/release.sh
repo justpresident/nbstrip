@@ -98,14 +98,20 @@ if [ "$ASSUME_YES" -ne 1 ]; then
     case "$reply" in y | Y | yes | YES) ;; *) die "aborted by user" ;; esac
 fi
 
-# --- tag, push, publish -------------------------------------------------------
-step "tag + push"
+# --- tag, publish, then push the tag -------------------------------------------
+# The tag is created BEFORE publishing (it marks exactly what gets published)
+# but pushed only AFTER `cargo publish` succeeds: a failed publish then leaves
+# just a local tag to clean up (`git tag -d`), never a stale remote tag that a
+# post-rebase retry can't overwrite (the 0.2.0 release hit exactly that).
+step "tag + push branch"
 git tag -a "$TAG" -m "$CRATE $VERSION"
 git push origin master
-git push origin "$TAG"
 
 step "cargo publish"
 cargo publish
+
+step "push tag"
+git push origin "$TAG"
 
 # --- GitHub release -----------------------------------------------------------
 step "gh release create $TAG"
