@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Mercurial `install` now also writes a `precommit.nbstrip` hook to
+  `.hg/hgrc` that aborts the commit when the nbstrip binary has gone missing
+  (moved, rebuilt elsewhere, `target/` cleaned). hg has no `filter.required`
+  equivalent and its pipe filter ignores the command's exit status, so a
+  vanished binary used to make `hg commit` *succeed* while storing an empty
+  notebook — silent data destruction on a later `hg update`/`revert`.
+  Already-wired repositories: re-run `nbstrip install` (idempotent).
+- Git `install` now also configures `filter.nbstrip.smudge = cat`. It used to
+  set only the clean filter plus `filter.nbstrip.required`, and with
+  `required` git treats a *missing* smudge command as a failed filter — so any
+  checkout/restore of an `.ipynb` in a wired clone aborted with
+  `fatal: <file>: smudge filter nbstrip failed`. Already-wired clones: re-run
+  `nbstrip install` (idempotent), or
+  `git config filter.nbstrip.smudge cat`.
+
 ## [0.2.0] - 2026-07-03
 
 ### Added

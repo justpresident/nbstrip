@@ -31,7 +31,8 @@ usage:
   nbstrip < in > out     stdin to stdout (the git clean filter)
   nbstrip install        register as the current repository's filter for
                          *.ipynb — git (config + .git/info/attributes) or
-                         Mercurial ([encode] pipe filter in .hg/hgrc)
+                         Mercurial ([encode] pipe filter + precommit guard
+                         hook in .hg/hgrc)
 
 options:
   -t, --textconv         print stripped notebooks to stdout instead of
@@ -51,13 +52,26 @@ const FLAG_VERSION_SHORT: &str = "-V";
 const CMD_INSTALL: &str = "install";
 
 const FILTER_CLEAN_KEY: &str = "filter.nbstrip.clean";
+const FILTER_SMUDGE_KEY: &str = "filter.nbstrip.smudge";
 const FILTER_REQUIRED_KEY: &str = "filter.nbstrip.required";
+/// Checkout pass-through. Repository content is already stripped, so smudge
+/// has nothing to do — but with `required` set, git treats a *missing* smudge
+/// command as a failed filter and aborts any checkout/restore of a `*.ipynb`,
+/// so the pass-through must be declared explicitly.
+const FILTER_SMUDGE_PASSTHROUGH: &str = "cat";
 /// The attribute line `install` writes into `.git/info/attributes`.
 const ATTRIBUTES_LINE: &str = "*.ipynb filter=nbstrip";
 
 /// Mercurial: the `.hg/hgrc` section and filter pattern `install` manages.
 const HG_ENCODE_SECTION: &str = "[encode]";
 const HG_ENCODE_PATTERN: &str = "**.ipynb";
+/// Mercurial has no `filter.required` equivalent: the `[encode]` pipe ignores
+/// the command's exit status, so a vanished binary would silently commit
+/// EMPTY notebooks (and `hg update`/`revert` would then materialize them).
+/// This repo-local precommit hook restores the loud failure — the commit
+/// aborts unless the binary still runs.
+const HG_HOOKS_SECTION: &str = "[hooks]";
+const HG_HOOK_KEY: &str = "precommit.nbstrip";
 
 fn main() -> ExitCode {
     match run() {
@@ -175,6 +189,10 @@ fn install_git(git_dir: &str, exe: &str) -> Result<(), String> {
     // The config value is run by git through `sh`, so quote the path.
     let clean_cmd = shell_quote(exe);
     cmd_ok("git", &["config", FILTER_CLEAN_KEY, &clean_cmd])?;
+    cmd_ok(
+        "git",
+        &["config", FILTER_SMUDGE_KEY, FILTER_SMUDGE_PASSTHROUGH],
+    )?;
     cmd_ok("git", &["config", FILTER_REQUIRED_KEY, "true"])?;
 
     let attributes = Path::new(git_dir).join("info").join("attributes");
@@ -199,61 +217,75 @@ fn install_git(git_dir: &str, exe: &str) -> Result<(), String> {
     }
 
     println!("configured {FILTER_CLEAN_KEY} = {clean_cmd}");
+    println!("configured {FILTER_SMUDGE_KEY} = {FILTER_SMUDGE_PASSTHROUGH}");
     println!("configured {FILTER_REQUIRED_KEY} = true");
     println!("notebooks now strip on `git add`; the working tree keeps its outputs.");
     Ok(())
 }
 
 /// Mercurial: an `[encode]` filter in `.hg/hgrc` — the same stdin→stdout
-/// contract as a git clean filter, applied as content enters the repository.
-/// Idempotent: an existing `**.ipynb` filter line is replaced (a reinstall
-/// from a new binary location must win), anything else in the file is kept.
+/// contract as a git clean filter, applied as content enters the repository —
+/// plus a `precommit` hook that aborts the commit if the binary vanished (see
+/// [`HG_HOOK_KEY`]). Idempotent: existing `**.ipynb` filter / hook lines are
+/// replaced (a reinstall from a new binary location must win), anything else
+/// in the file is kept.
 fn install_hg(hg_root: &str, exe: &str) -> Result<(), String> {
     let hgrc = Path::new(hg_root).join(".hg").join("hgrc");
-    let filter_line = format!("{HG_ENCODE_PATTERN} = pipe: {}", shell_quote(exe));
+    let quoted_exe = shell_quote(exe);
+    let filter_line = format!("{HG_ENCODE_PATTERN} = pipe: {quoted_exe}");
+    let hook_line = format!("{HG_HOOK_KEY} = {quoted_exe} {FLAG_VERSION} >/dev/null");
 
     let existing = fs::read_to_string(&hgrc).unwrap_or_default();
     let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
-    let mut in_encode = false;
-    let mut replaced = false;
-    let mut insert_at = None; // after the [encode] header, or its last line
-    for (i, line) in lines.iter_mut().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_encode = trimmed == HG_ENCODE_SECTION;
-        }
-        if in_encode {
-            insert_at = Some(i + 1);
-            if trimmed
-                .split('=')
-                .next()
-                .is_some_and(|key| key.trim() == HG_ENCODE_PATTERN)
-            {
-                line.clone_from(&filter_line);
-                replaced = true;
-                break;
-            }
-        }
-    }
-    if !replaced {
-        if let Some(at) = insert_at {
-            lines.insert(at, filter_line.clone());
-        } else {
-            if !lines.is_empty() {
-                lines.push(String::new());
-            }
-            lines.push(HG_ENCODE_SECTION.to_owned());
-            lines.push(filter_line.clone());
-        }
-    }
+    hgrc_upsert(
+        &mut lines,
+        HG_ENCODE_SECTION,
+        HG_ENCODE_PATTERN,
+        &filter_line,
+    );
+    hgrc_upsert(&mut lines, HG_HOOKS_SECTION, HG_HOOK_KEY, &hook_line);
     fs::write(&hgrc, format!("{}\n", lines.join("\n")))
         .map_err(|e| format!("writing {}: {e}", hgrc.display()))?;
 
     println!("wrote {}:", hgrc.display());
     println!("  {HG_ENCODE_SECTION}");
     println!("  {filter_line}");
+    println!("  {HG_HOOKS_SECTION}");
+    println!("  {hook_line}");
     println!("notebooks now strip on `hg commit`; the working directory keeps its outputs.");
+    println!("a commit aborts if the nbstrip binary goes missing (re-run install to re-wire).");
     Ok(())
+}
+
+/// Set `key = ...` to exactly `entry` inside `section` of an hgrc, keeping
+/// everything else: an existing line for `key` is replaced in place, a
+/// missing line is inserted after the section's last line, and a missing
+/// section is appended.
+fn hgrc_upsert(lines: &mut Vec<String>, section: &str, key: &str, entry: &str) {
+    let mut in_section = false;
+    let mut insert_at = None; // after the section header, or its last line
+    for (i, line) in lines.iter_mut().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_section = trimmed == section;
+        }
+        if in_section {
+            insert_at = Some(i + 1);
+            if trimmed.split('=').next().is_some_and(|k| k.trim() == key) {
+                entry.clone_into(line);
+                return;
+            }
+        }
+    }
+    if let Some(at) = insert_at {
+        lines.insert(at, entry.to_owned());
+    } else {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(section.to_owned());
+        lines.push(entry.to_owned());
+    }
 }
 
 /// Run a command, require success, return trimmed stdout.

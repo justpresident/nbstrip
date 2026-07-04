@@ -32,13 +32,21 @@ nbstrip install    # detects git or Mercurial
 
 **Mercurial:** inside an hg repository, `install` writes an `[encode]` filter
 to `.hg/hgrc` (`**.ipynb = pipe: /path/to/nbstrip`) — same effect: commits
-store stripped notebooks, the working directory keeps its outputs. Repo-local
-and idempotent; a reinstall updates the binary path in place. When a git and
-an hg repository are nested, git wins.
+store stripped notebooks, the working directory keeps its outputs. It also
+writes a `precommit.nbstrip` hook that aborts the commit if the binary has
+gone missing: hg has no `filter.required` equivalent and its pipe filter
+ignores the command's exit status, so without the hook a vanished binary
+would silently commit *empty* notebooks. Repo-local and idempotent; a
+reinstall updates the binary path in both lines in place. When a git and an
+hg repository are nested, git wins.
 
 **Git:** `install` registers the binary as the repository's clean filter for `*.ipynb`
 (`filter.nbstrip.clean` + `filter.nbstrip.required` in the repo's git config,
-the attribute line in `.git/info/attributes`). Nothing needs committing. From
+the attribute line in `.git/info/attributes`). It also sets
+`filter.nbstrip.smudge = cat`: checkout needs no transformation — repository
+content is already stripped — but with `required` set, git treats a *missing*
+smudge command as a failed filter and aborts any checkout of an `.ipynb`, so
+the pass-through must be declared explicitly. Nothing needs committing. From
 then on `git add` stages notebooks stripped, `git diff`/`git status` compare
 through the filter, and the working tree keeps its outputs.
 
